@@ -1,0 +1,285 @@
+# BBox plugin
+#
+# Author: Smanar
+#
+"""
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.0" wikilink="https://github.com/Smanar/">
+    <description>
+        <br/><br/>
+        <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
+        Pour le moment sert juste a lister les peripheriques, WOL.
+        <br/><br/>
+        <h3>Remark</h3>
+        <ul style="list-style-type:square">
+            <li>...</li>
+        </ul>
+        <h3>Configuration</h3>
+        Gateway configuration
+    </description>
+    <params>
+        <param field="Mode1" label="Delai en secondes" width="75px" required="true" default="300" />
+        <param field="Mode3" label="Debug" width="150px">
+            <options>
+                <option label="None" value="0"  default="true" />
+                <option label="Debug info Only" value="2"/>
+                <option label="Basic Debugging" value="62"/>
+                <option label="Basic+Messages" value="126"/>
+                <option label="Connections Only" value="16"/>
+                <option label="Connections+Python" value="18"/>
+                <option label="Connections+Queue" value="144"/>
+                <option label="All" value="-1"/>
+            </options>
+        </param>
+    </params>
+</plugin>
+"""
+#https://api.bbox.fr/doc/#Getting%20started
+# API complete : https://api.bbox.fr/doc/apirouter/index.html#
+
+
+# All imports
+import Domoticz
+
+import json, requests
+
+URL = "mabbox.bytel.fr"
+NEED_ADMIN_RIGHT = False
+
+class BasePlugin:
+   
+    def __init__(self):
+        self.httpConn = None
+        self.url = None
+        self.listdevice = {}
+        self.tempo = 0
+        self.counter = 0
+        
+        self.cookie = None
+        return
+
+    def onStart(self):
+        Domoticz.Log("onSart")
+        
+        if Parameters["Mode3"] != "0":
+            Domoticz.Debugging(int(Parameters["Mode3"]))
+            
+        self.tempo = int(Parameters["Mode1"]) / 10
+        
+        #Retreive cookies
+        if NEED_ADMIN_RIGHT:
+            try:
+                #Ne pas oublier cette ligne
+                zz(mm)
+                data = {'password': 'XXXXXXXXXXXXX','remember':'1'}
+                headers={'Accept':'*/*','host':URL}
+                result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5)
+                self.cookie = result.cookies['BBOX_ID']
+                Domoticz.Log("Cookie recupéré : " + self.cookie)
+            except:
+                Domoticz.Log("Pas de cookie recupéré")
+        
+        #To force an update
+        self.counter = 999999
+
+    def onStop(self):
+        Domoticz.Log("onStop - Plugin is stopping.")
+
+    def onConnect(self, Connection, Status, Description):
+        Domoticz.Debug("Connect")
+        if (Status == 0):
+            Domoticz.Debug("connected successfully.")
+            h = {'User-Agent':'Domoticz','Accept':'*/*' ,'Host':URL }
+            if self.cookie:
+                h['Cookie'] = self.cookie
+                Domoticz.Log(str(h))
+
+            sendData = {}
+            sendData['Verb'] = 'GET'
+            sendData['URL'] = self.url
+            sendData['Headers'] = h
+      
+            self.url = None
+            Connection.Send(sendData)
+        else:
+            Domoticz.Log("Failed to connect ("+str(Status)+") with error: "+Description)
+
+    def onMessage(self, Connection, Data):
+        #Domoticz.Log("****************** "  + str(Data) )
+        
+        Status = int(Data["Status"])
+        
+        try:
+            strData = Data["Data"].decode("utf-8", "ignore")
+            Response = json.loads(strData)
+        except:
+            Domoticz.Error("On message error "  + str(Data) )
+            Response = ''
+
+        if (Status == 200):
+            #Ok bien recu data, deconnexion
+            self.httpConn.Disconnect()
+            
+            #Traitement
+            _json = Response[0]
+            
+            if 'hosts' in _json:
+                _json = _json['hosts']['list']
+
+                for i in _json:
+                    macaddress = i['macaddress']
+                    if macaddress not in self.listdevice:
+                        self.listdevice[macaddress] = {}
+                    
+                    self.listdevice[macaddress]['id'] = i['id']
+                    self.listdevice[macaddress]['hostname'] = i['hostname']
+                    self.listdevice[macaddress]['ipaddress'] = i['ipaddress']
+                    self.listdevice[macaddress]['active'] = i['active']
+                    
+                    link = i['link']
+                    rssi = 100
+                    if link.startswith('Wifi'):
+                        _rssi = i['wireless']['rssi0']
+                        _rssi = - int ( _rssi)
+                        if _rssi < 60:
+                            rssi = 99
+                        elif _rssi > 75:
+                            rssi = 33
+                        else:
+                            rssi = 66
+                        
+                    self.listdevice[macaddress]['rssi'] = rssi
+
+                #for i in self.listdevice:
+                #    Domoticz.Log('Device: ' + self.listdevice[i]['hostname'] + ' active : ' + str(self.listdevice[i]['active']))
+                    
+                self.UpdateDevice()
+                
+            else:
+                Domoticz.Log('Not managed Json')
+                
+        elif (Status == 307):
+            Domoticz.Error("Router returned a status: " + str(Status) + " Operation requires authentication")
+                
+        else:
+            Domoticz.Error("Router returned a status: " + str(Status))
+
+    def onCommand(self, Unit, Command, Level, Hue):
+        Domoticz.Log("onCommand called for Unit " + str(Unit) + ": Parameter '" + str(Command) + "', Level: " + str(Level))
+        
+        if Command == "On":
+            #Get device id
+            mac = Devices[Unit].DeviceID
+            Domoticz.Log(str(self.listdevice[mac]))
+            id = self.listdevice[mac]['id']
+            url = '/v1/hosts/:' + str(id) + '?btoken=wakeup'
+            self.Request(url)
+            
+
+    def onDisconnect(self, Connection):
+        Domoticz.Debug("onDisconnect called for connection to: "+Connection.Address+":"+Connection.Port)
+        self.httpConn = None
+
+    def onHeartbeat(self):
+        self.counter += 1
+        if self.counter > self.tempo:
+            self.counter = 0
+            Domoticz.Log("MAJ BBox")
+            self.Request('/api/v1/hosts')
+        
+        Domoticz.Debug("HeartBeat")
+
+#---------------------------------------------------------------------------------------------------------
+
+    def Request(self,url):
+        if not self.httpConn and not self.url:
+            Domoticz.Debug("Making request " + "https://" + URL + url)
+            self.url = url
+            self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol="HTTPS", Address=URL, Port="443")
+            self.httpConn.Connect()
+        else:
+            Domoticz.Debug("Connection already active")
+
+                
+    def UpdateDevice(self):
+
+        for i in self.listdevice:
+            mac = i
+            unit = GetDevice(mac)
+            
+            #Create device if not exist
+            if not unit:
+                unit = FreeUnit()
+                Domoticz.Status("DeviceCreation : " + self.listdevice[i]['hostname'] )
+                Domoticz.Device(Name=self.listdevice[i]['hostname'], Unit=unit, DeviceID=mac , Type=244, Subtype=73, Switchtype=0, Image=17, ).Create()
+            
+            active = Devices[unit].nValue
+
+            if self.listdevice[i]['active'] != Devices[unit].nValue:
+                kwarg = {}
+                Domoticz.Log("Device Update : " + self.listdevice[i]['hostname'] )
+                
+                kwarg['SignalLevel'] = self.listdevice[i]['rssi']
+                
+                kwarg['nValue'] = self.listdevice[i]['active']
+                if kwarg['nValue'] == 1:
+                    kwarg['sValue'] = "On"
+                else:
+                    kwarg['sValue'] = "Off"
+                    
+                Devices[unit].Update(**kwarg)
+
+
+
+global _plugin
+_plugin = BasePlugin()
+
+def onStart():
+    global _plugin
+    _plugin.onStart()
+
+def onStop():
+    global _plugin
+    _plugin.onStop()
+
+def onConnect(Connection, Status, Description):
+    global _plugin
+    _plugin.onConnect(Connection, Status, Description)
+
+def onMessage(Connection, Data):
+    global _plugin
+    _plugin.onMessage(Connection, Data)
+
+def onCommand(Unit, Command, Level, Hue):
+    global _plugin
+    _plugin.onCommand(Unit, Command, Level, Hue)
+
+def onNotification(Name, Subject, Text, Status, Priority, Sound, ImageFile):
+    global _plugin
+    _plugin.onNotification(Name, Subject, Text, Status, Priority, Sound, ImageFile)
+
+def onDisconnect(Connection):
+    global _plugin
+    _plugin.onDisconnect(Connection)
+
+def onHeartbeat():
+    global _plugin
+    _plugin.onHeartbeat()
+
+    
+#-----------------------------------------------------------------
+
+def GetDevice(mac):
+    for x in Devices:
+        if Devices[x].DeviceID == str(mac) :
+            return x
+    return False
+        
+def FreeUnit() :
+    FreeUnit = ""
+    for x in range(1,256):
+        if x not in Devices :
+            FreeUnit=x
+            return FreeUnit
+    if FreeUnit == "" :
+        FreeUnit=len(Devices)+1
+    return FreeUnit    
