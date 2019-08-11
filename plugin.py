@@ -3,7 +3,7 @@
 # Author: Smanar
 #
 """
-<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.0" wikilink="https://github.com/Smanar/">
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.0" wikilink="https://github.com/Smanar/Domoticz-BBox">
     <description>
         <br/><br/>
         <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
@@ -11,13 +11,14 @@
         <br/><br/>
         <h3>Remark</h3>
         <ul style="list-style-type:square">
-            <li>...</li>
+            <li>Le mot de passe n'est utile que pour les actions demandant des droits d'acces, vous pouvez laisser le champs vide.</li>
         </ul>
         <h3>Configuration</h3>
         Gateway configuration
     </description>
     <params>
         <param field="Mode1" label="Delai en secondes" width="75px" required="true" default="300" />
+        <param field="Mode2" label="Password (si besoin)" width="100px" required="false" default="" />
         <param field="Mode3" label="Debug" width="150px">
             <options>
                 <option label="None" value="0"  default="true" />
@@ -43,13 +44,13 @@ import Domoticz
 import json, requests
 
 URL = "mabbox.bytel.fr"
-NEED_ADMIN_RIGHT = False
 
 class BasePlugin:
    
     def __init__(self):
         self.httpConn = None
         self.url = None
+        self.data = None
         self.listdevice = {}
         self.tempo = 0
         self.counter = 0
@@ -66,17 +67,15 @@ class BasePlugin:
         self.tempo = int(Parameters["Mode1"]) / 10
         
         #Retreive cookies
-        if NEED_ADMIN_RIGHT:
+        if Parameters["Mode2"] != "":
             try:
-                #Ne pas oublier cette ligne
-                zz(mm)
-                data = {'password': 'XXXXXXXXXXXXX','remember':'1'}
+                data = {'password': Parameters["Mode2"],'remember':'1'}
                 headers={'Accept':'*/*','host':URL}
                 result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5)
-                self.cookie = result.cookies['BBOX_ID']
-                Domoticz.Log("Cookie recupéré : " + self.cookie)
+                self.cookie = 'BBOX_ID=' + result.cookies['BBOX_ID']
+                Domoticz.Status("Cookie recupéré, mode admin possible !")
             except:
-                Domoticz.Log("Pas de cookie recupéré")
+                Domoticz.Error("Pas de cookie recupéré")
         
         #To force an update
         self.counter = 999999
@@ -88,36 +87,54 @@ class BasePlugin:
         Domoticz.Debug("Connect")
         if (Status == 0):
             Domoticz.Debug("connected successfully.")
-            h = {'User-Agent':'Domoticz','Accept':'*/*' ,'Host':URL }
+            
+            h = {
+                'User-Agent':'Domoticz',\
+                'Accept':'*/*' ,\
+                'Host':URL,\
+                'Connection':'keep-alive'\
+                 }
+            
             if self.cookie:
                 h['Cookie'] = self.cookie
-                Domoticz.Log(str(h))
 
             sendData = {}
-            sendData['Verb'] = 'GET'
+            if self.data:
+                sendData['Verb'] = 'POST'
+                sendData['Data'] = self.data
+            else:
+                sendData['Verb'] = 'GET'
             sendData['URL'] = self.url
             sendData['Headers'] = h
       
             self.url = None
+            self.data = None
+            
             Connection.Send(sendData)
         else:
             Domoticz.Log("Failed to connect ("+str(Status)+") with error: "+Description)
 
     def onMessage(self, Connection, Data):
         #Domoticz.Log("****************** "  + str(Data) )
+        Domoticz.Log("OnMessage")
         
         Status = int(Data["Status"])
-        
+        Response = ''
+
         try:
-            strData = Data["Data"].decode("utf-8", "ignore")
-            Response = json.loads(strData)
+            if "Data" in Data:
+                strData = Data["Data"].decode("utf-8", "ignore")
+                Response = json.loads(strData)
         except:
             Domoticz.Error("On message error "  + str(Data) )
-            Response = ''
 
         if (Status == 200):
             #Ok bien recu data, deconnexion
             self.httpConn.Disconnect()
+            
+            if len(Response) == 0:
+                Domoticz.Status("Requete effectuée")
+                return
             
             #Traitement
             _json = Response[0]
@@ -136,16 +153,16 @@ class BasePlugin:
                     self.listdevice[macaddress]['active'] = i['active']
                     
                     link = i['link']
-                    rssi = 100
+                    rssi = 12
                     if link.startswith('Wifi'):
                         _rssi = i['wireless']['rssi0']
                         _rssi = - int ( _rssi)
                         if _rssi < 60:
-                            rssi = 99
+                            rssi = 11
                         elif _rssi > 75:
-                            rssi = 33
+                            rssi = 4
                         else:
-                            rssi = 66
+                            rssi = 8
                         
                     self.listdevice[macaddress]['rssi'] = rssi
 
@@ -166,14 +183,32 @@ class BasePlugin:
     def onCommand(self, Unit, Command, Level, Hue):
         Domoticz.Log("onCommand called for Unit " + str(Unit) + ": Parameter '" + str(Command) + "', Level: " + str(Level))
         
+        if len(self.listdevice) == 0:
+            Domoticz.Log("Plugin not ready")
+            return
+        
         if Command == "On":
             #Get device id
             mac = Devices[Unit].DeviceID
             Domoticz.Log(str(self.listdevice[mac]))
             id = self.listdevice[mac]['id']
-            url = '/v1/hosts/:' + str(id) + '?btoken=wakeup'
-            self.Request(url)
+            #Get token
+            token = GetToken(self.cookie)
+            if not token:
+                return
+            #Make request
+            url = '/api/v1/hosts/' + str(id) + '?btoken=' + token
+            data = "action=wakeup"
+            self.Request(url,data)
             
+        if Command == "Off":
+            #Get device id
+            mac = Devices[Unit].DeviceID
+            Domoticz.Log(str(self.listdevice[mac]))
+            ip = self.listdevice[mac]['ipaddress']
+            #Make request
+            url = 'http://' + ip + ':8000/?action=System.Sleep'
+            self.Request(url)
 
     def onDisconnect(self, Connection):
         Domoticz.Debug("onDisconnect called for connection to: "+Connection.Address+":"+Connection.Port)
@@ -190,10 +225,11 @@ class BasePlugin:
 
 #---------------------------------------------------------------------------------------------------------
 
-    def Request(self,url):
+    def Request(self,url,data=None):
         if not self.httpConn and not self.url:
             Domoticz.Debug("Making request " + "https://" + URL + url)
             self.url = url
+            self.data = data
             self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol="HTTPS", Address=URL, Port="443")
             self.httpConn.Connect()
         else:
@@ -283,3 +319,18 @@ def FreeUnit() :
     if FreeUnit == "" :
         FreeUnit=len(Devices)+1
     return FreeUnit    
+
+def GetToken(cookie):
+    if not cookie:
+        Domoticz.Error("Cookie manquants")
+        
+    try:
+        headers={'Accept':'*/*','host':URL,"Cookie":cookie}
+        result = requests.get('https://' + URL + '/api/v1/device/token' , headers=headers, timeout = 5)
+        json = result.json()
+        json = json[0]['device']['token']
+        Domoticz.Log("Token ok")
+        return json
+    except:
+        Domoticz.Error("Token non recupéré")
+    return False
