@@ -74,7 +74,7 @@ class BasePlugin:
             self.cookie = GetCookie(self.password)
 
         #To force an update
-        self.counter = 999999
+        self.ForceUpdate(10)
 
         Domoticz.Status("BBox plugin running !")
 
@@ -122,55 +122,68 @@ class BasePlugin:
         try:
             if "Data" in Data:
                 strData = Data["Data"].decode("utf-8", "ignore")
-                Response = json.loads(strData)
+                try:
+                    Response = json.loads(strData)
+                except:
+                    Response = str(strData)
         except:
             Domoticz.Error("On message error "  + str(Data) )
 
         if (Status == 200):
-            #Ok bien recu data, deconnexion
-            self.httpConn.Disconnect()
+            #Ok bien recu data, deconnexion si besoin.
+            if self.httpConn.Connected():
+                self.httpConn.Disconnect()
 
             if len(Response) == 0:
                 Domoticz.Status("Requete effectuée")
                 return
 
             #Traitement
-            _json = Response[0]
-
-            if 'hosts' in _json:
-                _json = _json['hosts']['list']
-
-                for i in _json:
-                    macaddress = i['macaddress']
-                    if macaddress not in self.listdevice:
-                        self.listdevice[macaddress] = {}
-
-                    self.listdevice[macaddress]['id'] = i['id']
-                    self.listdevice[macaddress]['hostname'] = i['hostname']
-                    self.listdevice[macaddress]['ipaddress'] = i['ipaddress']
-                    self.listdevice[macaddress]['active'] = i['active']
-
-                    link = i['link']
-                    rssi = 12
-                    if link.startswith('Wifi'):
-                        _rssi = i['wireless']['rssi0']
-                        _rssi = - int ( _rssi)
-                        if _rssi < 60:
-                            rssi = 11
-                        elif _rssi > 75:
-                            rssi = 4
-                        else:
-                            rssi = 8
-
-                    self.listdevice[macaddress]['rssi'] = rssi
-
-                #for i in self.listdevice:
-                #    Domoticz.Log('Device: ' + self.listdevice[i]['hostname'] + ' active : ' + str(self.listdevice[i]['active']))
-
-                self.UpdateDevice()
+            if type(Response) is str:
+                # Html code
+                if 'Computer will begin to sleep' in Response:
+                    Domoticz.Status("Command send succesfull at Switchoff")
+                else:
+                    Domoticz.Error("Unknow responde : " + str(Response))
 
             else:
-                Domoticz.Log('Not managed Json')
+                # Json code
+                _json = Response[0]
+
+                if 'hosts' in _json:
+                    _json = _json['hosts']['list']
+
+                    for i in _json:
+                        macaddress = i['macaddress']
+                        if macaddress not in self.listdevice:
+                            self.listdevice[macaddress] = {}
+
+                        self.listdevice[macaddress]['id'] = i['id']
+                        self.listdevice[macaddress]['hostname'] = i['hostname']
+                        self.listdevice[macaddress]['ipaddress'] = i['ipaddress']
+                        self.listdevice[macaddress]['active'] = i['active']
+
+                        link = i['link']
+                        rssi = 12
+                        if link.startswith('Wifi'):
+                            _rssi = i['wireless']['rssi0']
+                            _rssi = - int ( _rssi)
+                            if _rssi < 60:
+                                rssi = 11
+                            elif _rssi > 75:
+                                rssi = 4
+                            else:
+                                rssi = 8
+
+                        self.listdevice[macaddress]['rssi'] = rssi
+
+                    #for i in self.listdevice:
+                    #    Domoticz.Log('Device: ' + self.listdevice[i]['hostname'] + ' active : ' + str(self.listdevice[i]['active']))
+
+                    self.UpdateDevice()
+
+                else:
+                    Domoticz.Log('Not managed Json')
 
         elif (Status == 307):
             Domoticz.Error("Router returned a status: " + str(Status) + " Operation requires authentication")
@@ -188,7 +201,7 @@ class BasePlugin:
         if Command == "On":
             #Get device id
             mac = Devices[Unit].DeviceID
-            Domoticz.Log(str(self.listdevice[mac]))
+            #Domoticz.Log(str(self.listdevice[mac]))
             id = self.listdevice[mac]['id']
             #Get token
             token = GetToken(self.cookie)
@@ -208,6 +221,9 @@ class BasePlugin:
             url = 'http://' + ip + ':8000/?action=System.Sleep'
             self.Request(url)
 
+        #Recuperation de l'etat 30s apres, ca peut prendre du temps
+        self.ForceUpdate(30)
+
     def onDisconnect(self, Connection):
         Domoticz.Debug("onDisconnect called for connection to: "+Connection.Address+":"+Connection.Port)
         self.httpConn = None
@@ -222,6 +238,9 @@ class BasePlugin:
         Domoticz.Debug("HeartBeat")
 
 #---------------------------------------------------------------------------------------------------------
+
+    def ForceUpdate(self,time):
+        self.counter = int(self.tempo - int(time) / 10)
 
     def Request(self,url,data=None):
         if not self.httpConn and not self.url:
