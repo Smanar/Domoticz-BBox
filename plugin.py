@@ -42,7 +42,8 @@
 # All imports
 import Domoticz
 
-import json, requests
+import json
+import requests
 
 URL = "mabbox.bytel.fr"
 
@@ -55,6 +56,7 @@ class BasePlugin:
         self.listdevice = {}
         self.tempo = 0
         self.counter = 0
+        self.UpdateSucced = False
 
         self.password = None
         self.cookie = None
@@ -115,6 +117,8 @@ class BasePlugin:
     def onMessage(self, Connection, Data):
         #Domoticz.Log("****************** "  + str(Data) )
         Domoticz.Debug("OnMessage")
+        
+        self.UpdateSucced = True
 
         Status = int(Data["Status"])
         Response = ''
@@ -132,7 +136,8 @@ class BasePlugin:
         if (Status == 200):
             #Ok bien recu data, deconnexion si besoin.
             if self.httpConn.Connected():
-                self.httpConn.Disconnect()
+                #self.httpConn.Disconnect()
+                pass
 
             if len(Response) == 0:
                 Domoticz.Status("Requete effectuée")
@@ -206,6 +211,11 @@ class BasePlugin:
             #Get token
             token = GetToken(self.cookie)
             if not token:
+                if self.password:
+                    self.cookie = GetCookie(self.password)
+                else:
+                    Domoticz.Error("And no password set.")
+                    
                 return
             #Make request
             url = '/api/v1/hosts/' + str(id) + '?btoken=' + token
@@ -215,7 +225,7 @@ class BasePlugin:
         if Command == "Off":
             #Get device id
             mac = Devices[Unit].DeviceID
-            Domoticz.Log(str(self.listdevice[mac]))
+            #Domoticz.Log(str(self.listdevice[mac]))
             ip = self.listdevice[mac]['ipaddress']
             #Make request
             url = 'http://' + ip + ':8000/?action=System.Sleep'
@@ -226,6 +236,8 @@ class BasePlugin:
 
     def onDisconnect(self, Connection):
         Domoticz.Debug("onDisconnect called for connection to: "+Connection.Address+":"+Connection.Port)
+        if self.UpdateSucced == False:
+            Domoticz.Error("Request not answer")
         self.httpConn = None
 
     def onHeartbeat(self):
@@ -244,6 +256,7 @@ class BasePlugin:
 
     def Request(self,url,data=None):
         if not self.httpConn and not self.url:
+            self.UpdateSucced = False
             _port = '443'
             _proto = 'HTTPS'
             _address = URL
@@ -368,6 +381,7 @@ def GetToken(cookie):
             Domoticz.Error("Token Error : " + str(_json['exception']))
             if _json['exception']['code'] == '401':
                 Domoticz.Error("Token Error : Not Authorized")
+
             return False
 
         _json = _json[0]['device']['token']
@@ -387,4 +401,5 @@ def GetCookie(password):
         return cookie
     except:
         Domoticz.Error("Pas de cookie recupéré")
+        Domoticz.Error(str(result.json()))
     return None
