@@ -45,6 +45,14 @@ import Domoticz
 import json
 import requests
 
+requests.packages.urllib3.disable_warnings()
+requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += 'HIGH:!DH:!aNULL'
+try:
+    requests.packages.urllib3.contrib.pyopenssl.DEFAULT_SSL_CIPHER_LIST += 'HIGH:!DH:!aNULL'
+except AttributeError:
+    # no pyopenssl support used / needed / available
+    pass
+
 URL = "mabbox.bytel.fr"
 
 class BasePlugin:
@@ -239,6 +247,7 @@ class BasePlugin:
         if self.UpdateSucced == False:
             Domoticz.Error("Request not answer")
         self.httpConn = None
+        self.url = None
 
     def onHeartbeat(self):
         self.counter += 1
@@ -255,7 +264,7 @@ class BasePlugin:
         self.counter = int(self.tempo - int(time) / 10)
 
     def Request(self,url,data=None):
-        if not self.httpConn and not self.url:
+        if not self.httpConn:
             self.UpdateSucced = False
             _port = '443'
             _proto = 'HTTPS'
@@ -374,7 +383,7 @@ def GetToken(cookie):
 
     try:
         headers={'Accept':'*/*','host':URL,"Cookie":cookie}
-        result = requests.get('https://' + URL + '/api/v1/device/token' , headers=headers, timeout = 5)
+        result = requests.get('https://' + URL + '/api/v1/device/token' , headers=headers, timeout = 5, verify=False)
         _json = result.json()
 
         if 'exception' in _json:
@@ -395,7 +404,7 @@ def GetCookie(password):
     try:
         data = {'password': password,'remember':'1'}
         headers={'Accept':'*/*','host':URL}
-        result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5)
+        result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5, verify=False)
         cookie = 'BBOX_ID=' + result.cookies['BBOX_ID']
         Domoticz.Status("Cookie recupéré, mode admin possible !")
         return cookie
