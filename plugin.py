@@ -3,7 +3,7 @@
 # Author: Smanar
 #
 """
-<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.0" wikilink="https://github.com/Smanar/Domoticz-BBox">
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.1" wikilink="https://github.com/Smanar/Domoticz-BBox">
     <description>
         <br/><br/>
         <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
@@ -125,7 +125,11 @@ class BasePlugin:
     def onMessage(self, Connection, Data):
         #Domoticz.Log("****************** "  + str(Data) )
         Domoticz.Debug("OnMessage")
-        
+
+        self.ManageAnswer(Data)
+
+    def ManageAnswer(self,Data):
+
         self.UpdateSucced = True
 
         Status = int(Data["Status"])
@@ -142,10 +146,6 @@ class BasePlugin:
             Domoticz.Error("On message error "  + str(Data) )
 
         if (Status == 200):
-            #Ok bien recu data, deconnexion si besoin.
-            if self.httpConn.Connected():
-                #self.httpConn.Disconnect()
-                pass
 
             if len(Response) == 0:
                 Domoticz.Status("Requete effectuée")
@@ -223,7 +223,7 @@ class BasePlugin:
                     self.cookie = GetCookie(self.password)
                 else:
                     Domoticz.Error("And no password set.")
-                    
+
                 return
             #Make request
             url = '/api/v1/hosts/' + str(id) + '?btoken=' + token
@@ -264,33 +264,46 @@ class BasePlugin:
         self.counter = int(self.tempo - int(time) / 10)
 
     def Request(self,url,data=None):
-        if not self.httpConn:
-            self.UpdateSucced = False
-            _port = '443'
-            _proto = 'HTTPS'
-            _address = URL
+        _port = '443'
+        _proto = 'HTTPS'
+        _address = URL
 
-            #if it's not a request to the box
-            if url.startswith('http'):
-                if not url.startswith('https'):
-                    _port = '80'
-                    _proto = 'HTTP'
-                t = url.split('/')
-                _address = t[2]
-                url = '/' + '/'.join(t[3:])
+        #if it's not a request to the box
+        if url.startswith('http'):
+            if not url.startswith('https'):
+                _port = '80'
+                _proto = 'HTTP'
+            t = url.split('/')
+            _address = t[2]
+            url = '/' + '/'.join(t[3:])
 
-                if ':' in _address:
-                    t = _address.split(':')
-                    _address = t[0]
-                    _port = t[1]
+            if ':' in _address:
+                t = _address.split(':')
+                _address = t[0]
+                _port = t[1]
 
-            Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
-            self.url = url
-            self.data = data
-            self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol=_proto, Address=_address, Port=_port)
-            self.httpConn.Connect()
+        Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
+
+        h = {
+            'User-Agent':'Domoticz',\
+            'Accept':'*/*' ,\
+            'Host':URL,\
+            'Connection':'keep-alive'\
+             }
+
+        if self.cookie:
+            h['Cookie'] = self.cookie
+
+        if data:
+             result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
         else:
-            Domoticz.Debug("Connection already active")
+             result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
+
+        data2 = {}
+        data2["Status"] = result.status_code
+        data2["Data"] = result.content
+
+        self.ManageAnswer(data2)
 
 
     def UpdateDevice(self):
