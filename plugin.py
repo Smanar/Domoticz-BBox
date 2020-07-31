@@ -54,6 +54,8 @@ except AttributeError:
     pass
 
 URL = "mabbox.bytel.fr"
+NO_DOMOTICZ_LIB = True
+ADSL_QUALITY = False
 
 class BasePlugin:
 
@@ -65,6 +67,9 @@ class BasePlugin:
         self.tempo = 0
         self.counter = 0
         self.UpdateSucced = False
+
+        self.down = 0
+        self.up = 0
 
         self.password = None
         self.cookie = None
@@ -195,6 +200,11 @@ class BasePlugin:
 
                     self.UpdateDevice()
 
+                elif 'wan' in _json:
+                    _json = _json['wan']['xdsl']
+                    self.up = _json['up']['power'] - _json['up']['noise']
+                    self.down = _json['down']['power'] - _json['down']['noise']
+
                 else:
                     Domoticz.Log('Not managed Json')
 
@@ -256,6 +266,11 @@ class BasePlugin:
             Domoticz.Log("MAJ BBox")
             self.Request('/api/v1/hosts')
 
+        if ADSL_QUALITY and (self.counter == self.tempo - 1):
+            Domoticz.Log("MAJ ADSL quality")
+            self.Request('/api/v1/wan/xdsl')
+
+
         Domoticz.Debug("HeartBeat")
 
 #---------------------------------------------------------------------------------------------------------
@@ -282,28 +297,43 @@ class BasePlugin:
                 _address = t[0]
                 _port = t[1]
 
-        Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
+        if NO_DOMOTICZ_LIB:
 
-        h = {
-            'User-Agent':'Domoticz',\
-            'Accept':'*/*' ,\
-            'Host':URL,\
-            'Connection':'keep-alive'\
-             }
+            Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
 
-        if self.cookie:
-            h['Cookie'] = self.cookie
+            h = {
+                'User-Agent':'Domoticz',\
+                'Accept':'*/*' ,\
+                'Host':URL,\
+                'Connection':'keep-alive'\
+                 }
 
-        if data:
-             result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
+            if self.cookie:
+                h['Cookie'] = self.cookie
+
+            if data:
+                 result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
+            else:
+                 result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
+
+            data2 = {}
+            data2["Status"] = result.status_code
+            data2["Data"] = result.content
+
+            self.ManageAnswer(data2)
+
         else:
-             result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
+            if not self.httpConn:
+                self.UpdateSucced = False
 
-        data2 = {}
-        data2["Status"] = result.status_code
-        data2["Data"] = result.content
+                Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
+                self.url = url
+                self.data = data
+                self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol=_proto, Address=_address, Port=_port)
+                self.httpConn.Connect()
 
-        self.ManageAnswer(data2)
+            else:
+                Domoticz.Debug("Connection already active")
 
 
     def UpdateDevice(self):
@@ -334,6 +364,15 @@ class BasePlugin:
 
                 Devices[unit].Update(**kwarg)
 
+        if ADSL_QUALITY:
+            unit = GetDevice("ADSL_QUALITY")
+            if not unit:
+                unit = FreeUnit()
+                Domoticz.Device(Name="ADSL_QUALITY", Unit=unit, DeviceID="ADSL_QUALITY" , Type=243, Subtype=19 ).Create()
+            kwarg = {}
+            kwarg['nValue'] = 0
+            kwarg['sValue'] = "Up: " + str(self.up) + " Down : " + str(self.down)
+            Devices[unit].Update(**kwarg)
 
 
 global _plugin
