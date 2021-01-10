@@ -462,5 +462,9 @@ def GetCookie(password):
         return cookie
     except:
         Domoticz.Error("Pas de cookie recupéré")
-        Domoticz.Error(str(result.json()))
+        try:
+            Domoticz.Error(str(result.json()))
+        except:
+            Domoticz.Error("No connexion usable")
+
     return None
