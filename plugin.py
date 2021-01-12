@@ -3,7 +3,7 @@
 # Author: Smanar
 #
 """
-<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.0" wikilink="https://github.com/Smanar/Domoticz-BBox">
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.1" wikilink="https://github.com/Smanar/Domoticz-BBox">
     <description>
         <br/><br/>
         <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
@@ -45,7 +45,17 @@ import Domoticz
 import json
 import requests
 
+requests.packages.urllib3.disable_warnings()
+requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += 'HIGH:!DH:!aNULL'
+try:
+    requests.packages.urllib3.contrib.pyopenssl.DEFAULT_SSL_CIPHER_LIST += 'HIGH:!DH:!aNULL'
+except AttributeError:
+    # no pyopenssl support used / needed / available
+    pass
+
 URL = "mabbox.bytel.fr"
+NO_DOMOTICZ_LIB = False
+ADSL_QUALITY = False
 
 class BasePlugin:
 
@@ -57,6 +67,9 @@ class BasePlugin:
         self.tempo = 0
         self.counter = 0
         self.UpdateSucced = False
+
+        self.down = 0
+        self.up = 0
 
         self.password = None
         self.cookie = None
@@ -117,7 +130,11 @@ class BasePlugin:
     def onMessage(self, Connection, Data):
         #Domoticz.Log("****************** "  + str(Data) )
         Domoticz.Debug("OnMessage")
-        
+
+        self.ManageAnswer(Data)
+
+    def ManageAnswer(self,Data):
+
         self.UpdateSucced = True
 
         Status = int(Data["Status"])
@@ -134,10 +151,6 @@ class BasePlugin:
             Domoticz.Error("On message error "  + str(Data) )
 
         if (Status == 200):
-            #Ok bien recu data, deconnexion si besoin.
-            if self.httpConn.Connected():
-                #self.httpConn.Disconnect()
-                pass
 
             if len(Response) == 0:
                 Domoticz.Status("Requete effectuée")
@@ -187,6 +200,11 @@ class BasePlugin:
 
                     self.UpdateDevice()
 
+                elif 'wan' in _json:
+                    _json = _json['wan']['xdsl']
+                    self.up = _json['up']['power'] - _json['up']['noise']
+                    self.down = _json['down']['power'] - _json['down']['noise']
+
                 else:
                     Domoticz.Log('Not managed Json')
 
@@ -215,7 +233,7 @@ class BasePlugin:
                     self.cookie = GetCookie(self.password)
                 else:
                     Domoticz.Error("And no password set.")
-                    
+
                 return
             #Make request
             url = '/api/v1/hosts/' + str(id) + '?btoken=' + token
@@ -239,6 +257,7 @@ class BasePlugin:
         if self.UpdateSucced == False:
             Domoticz.Error("Request not answer")
         self.httpConn = None
+        self.url = None
 
     def onHeartbeat(self):
         self.counter += 1
@@ -246,6 +265,11 @@ class BasePlugin:
             self.counter = 0
             Domoticz.Log("MAJ BBox")
             self.Request('/api/v1/hosts')
+
+        if ADSL_QUALITY and (self.counter == self.tempo - 1):
+            Domoticz.Log("MAJ ADSL quality")
+            self.Request('/api/v1/wan/xdsl')
+
 
         Domoticz.Debug("HeartBeat")
 
@@ -255,33 +279,61 @@ class BasePlugin:
         self.counter = int(self.tempo - int(time) / 10)
 
     def Request(self,url,data=None):
-        if not self.httpConn and not self.url:
-            self.UpdateSucced = False
-            _port = '443'
-            _proto = 'HTTPS'
-            _address = URL
+        _port = '443'
+        _proto = 'HTTPS'
+        _address = URL
 
-            #if it's not a request to the box
-            if url.startswith('http'):
-                if not url.startswith('https'):
-                    _port = '80'
-                    _proto = 'HTTP'
-                t = url.split('/')
-                _address = t[2]
-                url = '/' + '/'.join(t[3:])
+        #if it's not a request to the box
+        if url.startswith('http'):
+            if not url.startswith('https'):
+                _port = '80'
+                _proto = 'HTTP'
+            t = url.split('/')
+            _address = t[2]
+            url = '/' + '/'.join(t[3:])
 
-                if ':' in _address:
-                    t = _address.split(':')
-                    _address = t[0]
-                    _port = t[1]
+            if ':' in _address:
+                t = _address.split(':')
+                _address = t[0]
+                _port = t[1]
+
+        if NO_DOMOTICZ_LIB:
 
             Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
-            self.url = url
-            self.data = data
-            self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol=_proto, Address=_address, Port=_port)
-            self.httpConn.Connect()
+
+            h = {
+                'User-Agent':'Domoticz',\
+                'Accept':'*/*' ,\
+                'Host':URL,\
+                'Connection':'keep-alive'\
+                 }
+
+            if self.cookie:
+                h['Cookie'] = self.cookie
+
+            if data:
+                 result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
+            else:
+                 result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
+
+            data2 = {}
+            data2["Status"] = result.status_code
+            data2["Data"] = result.content
+
+            self.ManageAnswer(data2)
+
         else:
-            Domoticz.Debug("Connection already active")
+            if not self.httpConn:
+                self.UpdateSucced = False
+
+                Domoticz.Debug("Making request " + _proto.lower() + "://" + _address + url)
+                self.url = url
+                self.data = data
+                self.httpConn = Domoticz.Connection(Name="BBox", Transport="TCP/IP", Protocol=_proto, Address=_address, Port=_port)
+                self.httpConn.Connect()
+
+            else:
+                Domoticz.Debug("Connection already active")
 
 
     def UpdateDevice(self):
@@ -312,6 +364,15 @@ class BasePlugin:
 
                 Devices[unit].Update(**kwarg)
 
+        if ADSL_QUALITY:
+            unit = GetDevice("ADSL_QUALITY")
+            if not unit:
+                unit = FreeUnit()
+                Domoticz.Device(Name="ADSL_QUALITY", Unit=unit, DeviceID="ADSL_QUALITY" , Type=243, Subtype=19 ).Create()
+            kwarg = {}
+            kwarg['nValue'] = 0
+            kwarg['sValue'] = "Up: " + str(self.up) + " Down : " + str(self.down)
+            Devices[unit].Update(**kwarg)
 
 
 global _plugin
@@ -374,7 +435,7 @@ def GetToken(cookie):
 
     try:
         headers={'Accept':'*/*','host':URL,"Cookie":cookie}
-        result = requests.get('https://' + URL + '/api/v1/device/token' , headers=headers, timeout = 5)
+        result = requests.get('https://' + URL + '/api/v1/device/token' , headers=headers, timeout = 5, verify=False)
         _json = result.json()
 
         if 'exception' in _json:
@@ -395,11 +456,15 @@ def GetCookie(password):
     try:
         data = {'password': password,'remember':'1'}
         headers={'Accept':'*/*','host':URL}
-        result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5)
+        result = requests.post('https://' + URL + '/api/v1/login' , headers=headers, data = data, timeout = 5, verify=False)
         cookie = 'BBOX_ID=' + result.cookies['BBOX_ID']
         Domoticz.Status("Cookie recupéré, mode admin possible !")
         return cookie
     except:
         Domoticz.Error("Pas de cookie recupéré")
-        Domoticz.Error(str(result.json()))
+        try:
+            Domoticz.Error(str(result.json()))
+        except:
+            Domoticz.Error("No connexion usable")
+
     return None
