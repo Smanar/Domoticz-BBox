@@ -54,7 +54,7 @@ except AttributeError:
     pass
 
 URL = "mabbox.bytel.fr"
-NO_DOMOTICZ_LIB = False
+NO_DOMOTICZ_LIB = True
 ADSL_QUALITY = False
 
 class BasePlugin:
