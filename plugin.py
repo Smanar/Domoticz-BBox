@@ -3,7 +3,7 @@
 # Author: Smanar
 #
 """
-<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.1" wikilink="https://github.com/Smanar/Domoticz-BBox">
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.2" wikilink="https://github.com/Smanar/Domoticz-BBox">
     <description>
         <br/><br/>
         <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
@@ -37,7 +37,6 @@
 
 # https://api.bbox.fr/doc/#Getting%20started
 # API complete : https://api.bbox.fr/doc/apirouter/index.html
-
 
 # All imports
 import Domoticz
@@ -342,17 +341,21 @@ class BasePlugin:
             mac = i
             unit = GetDevice(mac)
 
+            Dev_name = self.listdevice[i]['hostname']
+            if Dev_name == "":
+                Dev_name = self.listdevice[i]['ipaddress']
+
             #Create device if not exist
             if not unit:
                 unit = FreeUnit()
-                Domoticz.Status("DeviceCreation : " + self.listdevice[i]['hostname'] )
-                Domoticz.Device(Name=self.listdevice[i]['hostname'], Unit=unit, DeviceID=mac , Type=244, Subtype=73, Switchtype=0, Image=17, ).Create()
+                Domoticz.Status("DeviceCreation : " + Dev_name )
+                Domoticz.Device(Name=Dev_name, Unit=unit, DeviceID=mac , Type=244, Subtype=73, Switchtype=0, Image=17, ).Create()
 
             active = Devices[unit].nValue
 
             if self.listdevice[i]['active'] != Devices[unit].nValue:
                 kwarg = {}
-                Domoticz.Log("Device Update : " + self.listdevice[i]['hostname'] )
+                Domoticz.Log("Device Update : " + Dev_name )
 
                 kwarg['SignalLevel'] = self.listdevice[i]['rssi']
 
