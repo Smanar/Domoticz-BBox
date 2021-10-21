@@ -3,18 +3,17 @@
 # Author: Smanar
 #
 """
-<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.2" wikilink="https://github.com/Smanar/Domoticz-BBox">
+<plugin key="BBox" name="BBox plugin" author="Smanar" version="1.0.3" wikilink="https://github.com/Smanar/Domoticz-BBox">
     <description>
         <br/><br/>
         <h2>Plugin pour le routeur de Bouygues telecom</h2><br/>
-        Pour le moment sert juste a lister les peripheriques, WOL.
+        Pour le moment sert juste a lister les peripheriques, WOL, afficher la qualite du Wifi.
         <br/><br/>
-        <h3>Remark</h3>
+        <h3>Remarque</h3>
         <ul style="list-style-type:square">
             <li>Le mot de passe n'est utile que pour les actions demandant des droits d'acces, vous pouvez laisser le champs vide.</li>
         </ul>
         <h3>Configuration</h3>
-        Gateway configuration
     </description>
     <params>
         <param field="Mode1" label="Delai en secondes" width="75px" required="true" default="300" />
@@ -310,16 +309,20 @@ class BasePlugin:
             if self.cookie:
                 h['Cookie'] = self.cookie
 
-            if data:
-                 result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
-            else:
-                 result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
+            try:
+                if data:
+                     result = requests.post( _proto.lower() + "://" + _address + url , headers=h, data = data, timeout = 5, verify=False)
+                else:
+                     result = requests.get( _proto.lower() + "://" + _address + url , headers=h, timeout = 5, verify=False)
 
-            data2 = {}
-            data2["Status"] = result.status_code
-            data2["Data"] = result.content
+                data2 = {}
+                data2["Status"] = result.status_code
+                data2["Data"] = result.content
 
-            self.ManageAnswer(data2)
+                self.ManageAnswer(data2)
+
+            except:
+                Domoticz.Error("Connection error : Box non joignable")
 
         else:
             if not self.httpConn:
