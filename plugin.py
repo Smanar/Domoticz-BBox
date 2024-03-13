@@ -81,10 +81,8 @@ class BasePlugin:
 
         self.tempo = int(Parameters["Mode1"]) / 10
 
-        #Retreive cookies
-        if Parameters["Mode2"] != "":
-            self.password = Parameters["Mode2"]
-            self.cookie = GetCookie(self.password)
+        #Retreive cookies for authentification
+        self.Login()
 
         #To force an update
         self.ForceUpdate(10)
@@ -206,8 +204,9 @@ class BasePlugin:
                 else:
                     Domoticz.Log('Not managed Json')
 
-        elif (Status == 307):
+        elif (Status == 307) or (Status == 401):
             Domoticz.Error("Router returned a status: " + str(Status) + " Operation requires authentication")
+            self.Login()
 
         else:
             Domoticz.Error("Router returned a status: " + str(Status))
@@ -275,6 +274,11 @@ class BasePlugin:
 
     def ForceUpdate(self,time):
         self.counter = int(self.tempo - int(time) / 10)
+
+    def Login(self):
+        if Parameters["Mode2"] != "":
+            self.password = Parameters["Mode2"]
+            self.cookie = GetCookie(self.password)   
 
     def Request(self,url,data=None):
         _port = '443'
@@ -467,7 +471,7 @@ def GetCookie(password):
         Domoticz.Status("Cookie recupéré, mode admin possible !")
         return cookie
     except:
-        Domoticz.Error("Pas de cookie recupéré")
+        Domoticz.Error("Pas de cookie recupéré, les fonctions demandant une autorisation ne marcheront pas")
         try:
             Domoticz.Error(str(result.json()))
         except:
