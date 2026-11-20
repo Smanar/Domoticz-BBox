@@ -22,5 +22,11 @@ You can later update the plugin
 ```git pull```
 - Restart Domoticz.    
 
+# Issue.
+If you have the error message 2026-11-20 19:39:21.202  "Error: BBox: No connexion usable", can be a DNS issue try this command to add the resolved url.   
+
+```echo "192.168.1.254 mabbox.bytel.fr" | sudo tee -a /etc/hosts```
+
+
 # Support
 https://easydomoticz.com/forum/viewtopic.php?f=10&t=8806
